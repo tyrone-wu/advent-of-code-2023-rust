@@ -9,7 +9,6 @@ struct Animal {
     steps: u32,
 }
 
-// Tile represents bit map
 // 0001 : (1 << 0) : north
 // 0010 : (1 << 1) : south
 // 0100 : (1 << 2) : east
@@ -36,7 +35,8 @@ fn parse_input(input: &str) -> (Animal, Vec<Vec<u8>>) {
     for (i, l) in lines.enumerate() {
         let tile_line: Vec<u8> =
             l.as_bytes()
-                .iter().enumerate()
+                .iter()
+                .enumerate()
                 .fold(Vec::with_capacity(l.len()), |mut acc, (j, t)| {
                     if start.is_none() && t == &b'S' {
                         start = Some(Animal {
@@ -70,11 +70,11 @@ fn clean_tiles(map: &mut Vec<Vec<u8>>) {
             if i == map.len() - 1 || ((map[i + 1][j] >> 0) & 1) & ((map[i][j] >> 1) & 1) == 0 {
                 map[i][j] &= !(1 << 1);
             }
-            if j == 0 || ((map[i][j - 1] >> 2) & 1) & ((map[i][j] >> 3) & 1) == 0 {
-                map[i][j] &= !(1 << 3);
-            }
             if j == map[0].len() - 1 || ((map[i][j + 1] >> 3) & 1) & ((map[i][j] >> 2) & 1) == 0 {
                 map[i][j] &= !(1 << 2);
+            }
+            if j == 0 || ((map[i][j - 1] >> 2) & 1) & ((map[i][j] >> 3) & 1) == 0 {
+                map[i][j] &= !(1 << 3);
             }
         }
     }
@@ -126,7 +126,6 @@ fn bfs(map: &mut Vec<Vec<u8>>, start: Animal) -> u32 {
 }
 
 fn dfs(map: &mut Vec<Vec<u8>>, start: &(usize, usize), current: (usize, usize)) -> Option<u32> {
-    // dbg!(&current);
     if (map[current.0][current.1] >> 4) & 1 == 1 {
         if start == &current {
             return Some(0);
@@ -181,11 +180,38 @@ pub fn part_two(input: &str) -> Option<u32> {
         }
     }
 
-    // for r in map.iter() {
-    //     let crosses = r.iter().filter(|c| (c >> 0) & 1 == 1 || (c >> 1) & 1 == 1).map(f)
-    // }
+    let mut in_tiles = 0;
+    for r in &map {
+        let mut crosses_count: u8 = 0;
 
-    Some(steps)
+        let mut cross_flag = 0;
+        for c in r {
+            cross_flag ^= ((1 << 2) - 1) & c;
+            if cross_flag == (1 << 1) | 1 {
+                crosses_count += 1;
+                cross_flag = 0;
+            }
+        }
+
+        if crosses_count % 2 == 1 {
+            continue;
+        }
+
+        let mut crosses_count: u8 = 0;
+        for c in r {
+            if *c == 0 && crosses_count % 2 == 1 {
+                in_tiles += 1;
+            } else {
+                cross_flag ^= ((1 << 2) - 1) & c;
+                if cross_flag == (1 << 1) | 1 {
+                    crosses_count += 1;
+                    cross_flag = 0;
+                }
+            }
+        }
+    }
+
+    Some(in_tiles)
 }
 
 #[cfg(test)]
@@ -194,26 +220,37 @@ mod tests {
 
     #[test]
     fn test_part_one() {
-        let result = part_one(&advent_of_code::template::read_file_part("examples", DAY, 1));
+        let result = part_one(&advent_of_code::template::read_file_part(
+            "examples", DAY, 1,
+        ));
         assert_eq!(result, Some(4));
 
-
-        let result = part_one(&advent_of_code::template::read_file_part("examples", DAY, 2));
+        let result = part_one(&advent_of_code::template::read_file_part(
+            "examples", DAY, 2,
+        ));
         assert_eq!(result, Some(8));
     }
 
     #[test]
     fn test_part_two() {
-        let result = part_two(&advent_of_code::template::read_file_part("examples", DAY, 3));
-        assert_eq!(result, Some(2));
+        let result = part_two(&advent_of_code::template::read_file_part(
+            "examples", DAY, 3,
+        ));
+        assert_eq!(result, Some(4));
 
-        let result = part_two(&advent_of_code::template::read_file_part("examples", DAY, 4));
-        assert_eq!(result, Some(2));
+        let result = part_two(&advent_of_code::template::read_file_part(
+            "examples", DAY, 4,
+        ));
+        assert_eq!(result, Some(4));
 
-        let result = part_two(&advent_of_code::template::read_file_part("examples", DAY, 5));
+        let result = part_two(&advent_of_code::template::read_file_part(
+            "examples", DAY, 5,
+        ));
         assert_eq!(result, Some(8));
 
-        let result = part_two(&advent_of_code::template::read_file_part("examples", DAY, 6));
+        let result = part_two(&advent_of_code::template::read_file_part(
+            "examples", DAY, 6,
+        ));
         assert_eq!(result, Some(10));
     }
 }
