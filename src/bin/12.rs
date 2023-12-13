@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use nom::{
-    branch::alt,
     bytes::complete::{tag, take_till1},
     character::complete::{self, newline},
     multi::{many0, many1, separated_list1},
@@ -11,37 +10,35 @@ use nom::{
 
 advent_of_code::solution!(12);
 
-#[derive(Debug)]
-struct ConditionRecord {
-    springs: Vec<u8>,
-    groups: Vec<usize>,
-}
-
 fn parse_groups(input: &str) -> IResult<&str, Vec<usize>> {
     let (input, groups) = separated_list1(tag(","), complete::u32)(input)?;
     Ok((input, groups.iter().map(|c| *c as usize).collect()))
 }
 
-fn parse_condition_record(input: &str) -> IResult<&str, ConditionRecord> {
-    let (input, (springs, groups)) = separated_pair(
-        many1(alt((tag("."), tag("#"), tag("?")))),
-        tag(" "),
-        parse_groups,
-    )(input)?;
-    Ok((
-        input,
-        ConditionRecord {
-            springs: springs.iter().map(|s| s.bytes().next().unwrap()).collect(),
-            groups,
-        },
-    ))
+fn parse_springs(input: &str) -> IResult<&str, Vec<u8>> {
+    let (input, springs) = take_till1(|c| c == ' ')(input)?;
+    Ok((input, springs.bytes().collect()))
 }
 
-fn parse_input(input: &str) -> IResult<&str, Vec<ConditionRecord>> {
+fn parse_spring_groups(input: &str) -> IResult<&str, Vec<String>> {
+    let (input, _) = many0(tag("."))(input)?;
+    if input.is_empty() {
+        return Ok((input, Vec::with_capacity(0)));
+    }
+    let (input, spring_groups) = separated_list1(many1(tag(".")), take_till1(|c| c == '.'))(input)?;
+    Ok((input, spring_groups.iter().map(|s| s.to_string()).collect()))
+}
+
+fn parse_condition_record(input: &str) -> IResult<&str, (Vec<u8>, Vec<usize>)> {
+    let (input, (springs, groups)) = separated_pair(parse_springs, tag(" "), parse_groups)(input)?;
+    Ok((input, (springs, groups)))
+}
+
+fn parse_input(input: &str) -> IResult<&str, Vec<(Vec<u8>, Vec<usize>)>> {
     separated_list1(newline, parse_condition_record)(input)
 }
 
-fn gen_permutation(springs: Vec<u8>, springs_perm: &mut Vec<String>, mut i: usize) {
+fn generate_permutation(springs: Vec<u8>, springs_perm: &mut Vec<String>, mut i: usize) {
     while i < springs.len() && springs[i] != b'?' {
         i += 1;
     }
@@ -52,48 +49,98 @@ fn gen_permutation(springs: Vec<u8>, springs_perm: &mut Vec<String>, mut i: usiz
 
     let mut operational = springs.clone();
     operational[i] = b'.';
-    gen_permutation(operational, springs_perm, i);
+    generate_permutation(operational, springs_perm, i);
 
     let mut damaged = springs;
     damaged[i] = b'#';
-    gen_permutation(damaged, springs_perm, i);
-}
-
-fn parse_spring_groups(input: &str) -> IResult<&str, Vec<&str>> {
-    let (input, _) = many0(tag("."))(input)?;
-    if input.is_empty() {
-        return Ok((input, Vec::with_capacity(0)));
-    }
-    separated_list1(many1(tag(".")), take_till1(|c| c == '.'))(input)
+    generate_permutation(damaged, springs_perm, i);
 }
 
 pub fn part_one(input: &str) -> Option<u32> {
-    let (_, cond_records) = parse_input(input).unwrap();
+    let (_, input_records) = parse_input(input).unwrap();
+
+    let condition_records: Vec<(Vec<String>, &Vec<usize>)> = input_records
+        .iter()
+        .map(|(springs, groupings)| {
+            let (_, spring_groups) =
+                parse_spring_groups(&String::from_utf8(springs.to_vec()).unwrap()).unwrap();
+            (spring_groups, groupings)
+        })
+        .collect();
+
+    let mut cache: HashMap<String, Vec<Vec<usize>>> = HashMap::new();
+
+    // Some(
+    //     input_records
+    //         .iter()
+    //         .map(|(original_springs, original_groupings)| {
+    //             let unknown_count = original_springs
+    //                 .iter()
+    //                 .filter(|spring| spring == &&b'?')
+    //                 .count();
+    //             let mut permutations: Vec<String> =
+    //                 Vec::with_capacity(2_usize.pow(unknown_count as u32));
+    //             generate_permutation(original_springs.to_vec(), &mut permutations, 0);
+
+    //             permutations
+    //                 .iter()
+    //                 .filter(|permutation| {
+    //                     let (_, permutation_groups) = parse_spring_groups(permutation).unwrap();
+    //                     let damaged_count: Vec<usize> =
+    //                         permutation_groups.iter().map(|s| s.len()).collect();
+    //                     original_groupings == &damaged_count
+    //                 })
+    //                 .count()
+    //         })
+    //         .sum::<usize>() as u32,
+    // )
 
     Some(
-        cond_records
+        condition_records
             .iter()
-            .map(|record: &ConditionRecord| {
-                let ConditionRecord {
-                    springs: orig_springs,
-                    groups,
-                } = &record;
-
-                let q_count = orig_springs
+            .map(|(original_springs, original_groupings)| {
+                let possible_spring_groups: Vec<Vec<Vec<usize>>> = original_springs
                     .iter()
-                    .filter(|spring| spring == &&b'?')
-                    .count();
-                let mut permutations: Vec<String> = Vec::with_capacity(2_usize.pow(q_count as u32));
-                gen_permutation(orig_springs.to_vec(), &mut permutations, 0);
+                    .map(|springs| {
+                        if !cache.contains_key(springs) {
+                            let mut permutations: Vec<String> = Vec::new();
+                            generate_permutation(springs.bytes().collect(), &mut permutations, 0);
 
-                permutations
-                    .iter()
-                    .filter(|permutation| {
-                        let permutation_groups = parse_spring_groups(permutation).unwrap().1;
-                        let spring_perm_count: Vec<usize> =
-                            permutation_groups.iter().map(|s| s.len()).collect();
-                        groups == &spring_perm_count
+                            let possible_groups_count: Vec<Vec<usize>> = permutations
+                                .iter()
+                                .map(|permutation| {
+                                    let (_, permutation_groups) =
+                                        parse_spring_groups(permutation).unwrap();
+                                    permutation_groups.iter().map(|s| s.len()).collect()
+                                })
+                                .collect();
+
+                            cache.insert(springs.to_string(), possible_groups_count);
+                        }
+                        cache.get(springs).unwrap().clone()
                     })
+                    .collect();
+
+                let mut arranged_groups: Vec<Vec<usize>> = possible_spring_groups[0].clone();
+                for psg in possible_spring_groups.iter().skip(1) {
+                    let mut arranged_groups_extended: Vec<Vec<usize>> = Vec::new();
+                    for ag in &arranged_groups {
+                        if ag.len() > original_groupings.len() {
+                            continue;
+                        }
+
+                        for g in psg {
+                            let mut ag_e = ag.clone();
+                            ag_e.extend(g.iter());
+                            arranged_groups_extended.push(ag_e);
+                        }
+                    }
+                    arranged_groups = arranged_groups_extended;
+                }
+
+                arranged_groups
+                    .iter()
+                    .filter(|ag| original_groupings == ag)
                     .count()
             })
             .sum::<usize>() as u32,
@@ -101,75 +148,17 @@ pub fn part_one(input: &str) -> Option<u32> {
 }
 
 pub fn part_two(input: &str) -> Option<u32> {
-    let (_, mut cond_records) = parse_input(input).unwrap();
-    for r in cond_records.iter_mut() {
-        let mut unfold_spring = r.springs.clone();
-        unfold_spring.insert(0, b'?');
-        r.springs
-            .extend(unfold_spring.iter().cycle().take(4 * unfold_spring.len()));
+    let (_, mut input_records) = parse_input(input).unwrap();
 
-        r.groups
-            .extend(r.groups.clone().iter().cycle().take(4 * r.groups.len()));
-    }
+    // for (springs, groupings) in input_records.iter_mut() {
+    //     let mut unfold_spring = springs.clone();
+    //     unfold_spring.insert(0, b'?');
+    //     springs.extend(unfold_spring.iter().cycle().take(4 * unfold_spring.len()));
 
-    let mut cache: HashMap<&str, Vec<Vec<usize>>> = HashMap::new();
+    //     groupings.extend(groupings.clone().iter().cycle().take(4 * groupings.len()));
+    // }
 
-    Some(
-        cond_records
-            .iter()
-            .map(|record: &ConditionRecord| {
-                cache.clear();
-                let ConditionRecord {
-                    springs: orig_springs,
-                    groups,
-                } = &record;
-
-                let spring_groups: Vec<&str> =
-                    parse_spring_groups(std::str::from_utf8(&orig_springs).unwrap())
-                        .unwrap()
-                        .1;
-                // let possible_spring_groups_record: Vec<Vec<Vec<usize>>> = spring_groups
-                //     .iter()
-                //     .map(|springs| {
-                //         if !cache.contains_key(springs) {
-                //             let mut permutations: Vec<String> = Vec::new();
-                //             gen_permutation(springs.bytes().collect(), &mut permutations, 0);
-
-                //             let possible_groups_count: Vec<Vec<usize>> = permutations
-                //                 .iter()
-                //                 .map(|permutation| {
-                //                     let permutation_groups =
-                //                         parse_spring_groups(permutation).unwrap().1;
-                //                     permutation_groups.iter().map(|s| s.len()).collect()
-                //                 })
-                //                 .collect();
-
-                //             cache.insert(&springs, possible_groups_count);
-                //         }
-                //         cache.get(springs).unwrap().clone()
-                //     })
-                //     .collect();
-
-                // let mut arranged_groups: Vec<Vec<usize>> = possible_spring_groups_record[0].clone();
-                // for psg in possible_spring_groups_record.iter().skip(1) {
-                //     let mut arranged_groups_extended: Vec<Vec<usize>> = Vec::new();
-                //     for ag in &arranged_groups {
-                //         for a in psg {
-                //             let mut ag_e = ag.clone();
-                //             ag_e.extend(a.iter());
-                //             arranged_groups_extended.push(ag_e);
-                //         }
-                //     }
-                //     arranged_groups = arranged_groups_extended;
-                // }
-
-                // let count = arranged_groups.iter().filter(|ag| groups == *ag).count();
-                // count
-
-                1
-            })
-            .sum::<usize>() as u32,
-    )
+    None
 }
 
 #[cfg(test)]
