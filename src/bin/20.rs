@@ -145,18 +145,14 @@ fn press_button(module_paths: &mut HashMap<&str, Path>, part_one: bool) -> Retur
 
                     let n_shift = inputs.get(source).unwrap();
                     *state = (*state & !(1 << n_shift)) | ((strength as u32) << n_shift);
-                    if *state == (1 << inputs.len()) - 1 {
-                        Some(false)
-                    } else {
-                        Some(true)
-                    }
+                    Some(*state != (1 << inputs.len()) - 1)
                 }
                 Module::Broadcast => Some(strength),
             };
 
             // Adds next pulses to process
             if let Some(send_strength) = processed_pulse {
-                for dst in destinations {
+                for dst in destinations.iter() {
                     pulse_queue.push_back(Pulse {
                         source: destination,
                         destination: dst,
@@ -193,7 +189,7 @@ pub fn part_one(input: &str) -> Option<u32> {
 }
 
 // calculates greatest common divisor
-fn gcd(mut a: usize, mut b: usize) -> usize {
+fn gcd(mut a: u64, mut b: u64) -> u64 {
     while b != 0 {
         let temp = b;
         b = a % b;
@@ -204,7 +200,7 @@ fn gcd(mut a: usize, mut b: usize) -> usize {
 }
 
 // calculates least common multiple of the given numbers
-fn lcm(values: Vec<usize>) -> usize {
+fn lcm(values: Vec<u64>) -> u64 {
     let mut a = values[0];
     for b in values.iter().skip(1) {
         a = a * b / gcd(a, *b)
@@ -212,13 +208,22 @@ fn lcm(values: Vec<usize>) -> usize {
     a
 }
 
-pub fn part_two(input: &str) -> Option<usize> {
+pub fn part_two(input: &str) -> Option<u64> {
     let (_, mut module_paths) = parse_input(input).unwrap();
     // Starts out as hashmap of strings with value of 0
-    let mut qt_inputs = module_paths
+    let mut qt_inputs: HashMap<String, u64> = module_paths
         .get("qt")
         .map(|Path { module, .. }| match module {
-            Module::Conjunction(conjunction) => conjunction.inputs.clone(),
+            Module::Conjunction(conjunction) => {
+                conjunction
+                    .inputs
+                    .keys()
+                    .cloned()
+                    .fold(HashMap::new(), |mut acc, name| {
+                        acc.insert(name, 0_u64);
+                        acc
+                    })
+            }
             _ => unreachable!(),
         })
         .unwrap();
@@ -228,17 +233,9 @@ pub fn part_two(input: &str) -> Option<usize> {
     while qt_inputs.values().any(|input_presses| *input_presses == 0) {
         presses += 1;
         if let ReturnPart::PartTwo(Some(input_name)) = press_button(&mut module_paths, false) {
-            // Adding this condition doesn't make it flaky, but produces the wrong output
-            // if *qt_inputs.get(&input_name).unwrap() == 0 {
-            //     qt_inputs.insert(input_name, presses);
-            // }
-
-            // Without the condition above, it produces flaky output, but one of the outputs is correct. happened to be my second execution that gave the right answer
             qt_inputs.insert(input_name, presses);
         }
     }
-
-    dbg!(&qt_inputs);
 
     Some(lcm(qt_inputs.values().cloned().collect()))
 }
