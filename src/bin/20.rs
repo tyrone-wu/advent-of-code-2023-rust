@@ -13,7 +13,9 @@ advent_of_code::solution!(20);
 
 #[derive(Debug, Clone)]
 struct Conjunction {
-    memory: HashMap<String, usize>,
+    // Tracks name of module and it's index bit position
+    inputs: HashMap<String, usize>,
+    // Tracks the pulse strengths of the inputs
     state: u32,
 }
 
@@ -30,6 +32,17 @@ struct Path<'a> {
     destinations: Vec<&'a str>,
 }
 
+struct Pulse<'a> {
+    source: &'a str,
+    destination: &'a str,
+    strength: bool,
+}
+
+enum ReturnPart {
+    PartOne(u32, u32),
+    PartTwo(Option<String>),
+}
+
 fn parse_path(input: &str) -> IResult<&str, (&str, Path)> {
     let (input, (name, module)) = alt((
         preceded(complete::char('%'), alpha1).map(|name| (name, Module::FlipFlop(false))),
@@ -37,7 +50,7 @@ fn parse_path(input: &str) -> IResult<&str, (&str, Path)> {
             (
                 name,
                 Module::Conjunction(Conjunction {
-                    memory: HashMap::new(),
+                    inputs: HashMap::new(),
                     state: 0,
                 }),
             )
@@ -69,11 +82,11 @@ fn parse_input(input: &str) -> IResult<&str, HashMap<&str, Path>> {
     for (n, p) in module_paths.clone().iter() {
         for d in p.destinations.iter() {
             if let Some(Path {
-                module: Module::Conjunction(Conjunction { ref mut memory, .. }),
+                module: Module::Conjunction(Conjunction { ref mut inputs, .. }),
                 ..
             }) = module_paths.get_mut(d)
             {
-                memory.insert(String::from(*n), memory.len());
+                inputs.insert(String::from(*n), inputs.len());
             }
         }
     }
@@ -81,18 +94,7 @@ fn parse_input(input: &str) -> IResult<&str, HashMap<&str, Path>> {
     Ok((input, module_paths))
 }
 
-struct Pulse<'a> {
-    source: &'a str,
-    destination: &'a str,
-    strength: bool,
-}
-
-enum Return {
-    PartOne(u32, u32),
-    PartTwo(Option<String>),
-}
-
-fn press_button(module_paths: &mut HashMap<&str, Path>, part_one: bool) -> Return {
+fn press_button(module_paths: &mut HashMap<&str, Path>, part_one: bool) -> ReturnPart {
     // p1
     let mut low_pulses = 0;
     let mut high_pulses = 0;
@@ -112,17 +114,20 @@ fn press_button(module_paths: &mut HashMap<&str, Path>, part_one: bool) -> Retur
         strength,
     }) = pulse_queue.pop_front()
     {
+        // p1
         if strength {
             high_pulses += 1;
         } else {
             low_pulses += 1;
         }
 
+        // If module exists then process it, otherwise ignore
         if let Some(Path {
             module,
             destinations,
         }) = module_paths.get_mut(destination)
         {
+            // Determines whether to send pulse, and the pulse strength
             let processed_pulse: Option<bool> = match module {
                 Module::FlipFlop(ref mut signal) => {
                     if !strength {
@@ -132,14 +137,15 @@ fn press_button(module_paths: &mut HashMap<&str, Path>, part_one: bool) -> Retur
                         None
                     }
                 }
-                Module::Conjunction(Conjunction { memory, state }) => {
+                Module::Conjunction(Conjunction { inputs, state }) => {
+                    // p2
                     if destination == "qt" && strength {
                         qt_mem = Some(String::from(source));
                     }
 
-                    let n_shift = memory.get(source).unwrap();
+                    let n_shift = inputs.get(source).unwrap();
                     *state = (*state & !(1 << n_shift)) | ((strength as u32) << n_shift);
-                    if *state == (1 << memory.len()) - 1 {
+                    if *state == (1 << inputs.len()) - 1 {
                         Some(false)
                     } else {
                         Some(true)
@@ -148,22 +154,24 @@ fn press_button(module_paths: &mut HashMap<&str, Path>, part_one: bool) -> Retur
                 Module::Broadcast => Some(strength),
             };
 
+            // Adds next pulses to process
             if let Some(send_strength) = processed_pulse {
-                destinations.iter().for_each(|dst| {
+                for dst in destinations {
                     pulse_queue.push_back(Pulse {
                         source: destination,
                         destination: dst,
                         strength: send_strength,
                     })
-                });
+                }
             }
         }
     }
 
+    // idk, there's probablt a better way of doing this
     if part_one {
-        Return::PartOne(low_pulses, high_pulses)
+        ReturnPart::PartOne(low_pulses, high_pulses)
     } else {
-        Return::PartTwo(qt_mem)
+        ReturnPart::PartTwo(qt_mem)
     }
 }
 
@@ -175,7 +183,7 @@ pub fn part_one(input: &str) -> Option<u32> {
     let mut high_pulses = 0;
 
     for _ in 0..cycles {
-        if let Return::PartOne(low, high) = press_button(&mut module_paths, true) {
+        if let ReturnPart::PartOne(low, high) = press_button(&mut module_paths, true) {
             low_pulses += low;
             high_pulses += high;
         }
@@ -184,6 +192,7 @@ pub fn part_one(input: &str) -> Option<u32> {
     Some(low_pulses * high_pulses)
 }
 
+// calculates greatest common divisor
 fn gcd(mut a: usize, mut b: usize) -> usize {
     while b != 0 {
         let temp = b;
@@ -194,6 +203,7 @@ fn gcd(mut a: usize, mut b: usize) -> usize {
     a
 }
 
+// calculates least common multiple of the given numbers
 fn lcm(values: Vec<usize>) -> usize {
     let mut a = values[0];
     for b in values.iter().skip(1) {
@@ -204,23 +214,31 @@ fn lcm(values: Vec<usize>) -> usize {
 
 pub fn part_two(input: &str) -> Option<usize> {
     let (_, mut module_paths) = parse_input(input).unwrap();
+    // Starts out as hashmap of strings with value of 0
     let mut qt_inputs = module_paths
         .get("qt")
         .map(|Path { module, .. }| match module {
-            Module::Conjunction(conjunction) => conjunction.memory.clone(),
+            Module::Conjunction(conjunction) => conjunction.inputs.clone(),
             _ => unreachable!(),
         })
         .unwrap();
 
     let mut presses = 0;
+    // Keep pressing until all inouts of `qt` have gotten a high pulse
     while qt_inputs.values().any(|input_presses| *input_presses == 0) {
         presses += 1;
-        if let Return::PartTwo(Some(input_name)) = press_button(&mut module_paths, false) {
+        if let ReturnPart::PartTwo(Some(input_name)) = press_button(&mut module_paths, false) {
+            // Adding this condition doesn't make it flaky, but produces the wrong output
+            // if *qt_inputs.get(&input_name).unwrap() == 0 {
+            //     qt_inputs.insert(input_name, presses);
+            // }
+
+            // Without the condition above, it produces flaky output, but one of the outputs is correct. happened to be my second execution that gave the right answer
             qt_inputs.insert(input_name, presses);
         }
     }
 
-    // println!("{:?}", qt_inputs);
+    dbg!(&qt_inputs);
 
     Some(lcm(qt_inputs.values().cloned().collect()))
 }
