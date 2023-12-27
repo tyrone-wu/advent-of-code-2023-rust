@@ -24,23 +24,14 @@ struct Brick {
 #[derive(Copy, Clone, Debug)]
 struct BrickPiece {
     brick_id: usize,
-    z_start: u32,
     z_end: u32,
     tainted: bool,
 }
 
 #[derive(Debug)]
 struct BrickNode {
-    brick_id: usize,
     parents: Vec<usize>,
     children: Vec<usize>,
-}
-
-#[derive(Debug)]
-struct BrickFall {
-    current_bid: usize,
-    prev_bid: Option<usize>,
-    chain: HashSet<usize>
 }
 
 fn parse_brick(input: &str) -> IResult<&str, Coord> {
@@ -109,7 +100,6 @@ fn stack_bricks(bricks: &[Brick]) -> (Vec<usize>, HashMap<usize, BrickNode>) {
 
                 grid[x][y].push(BrickPiece {
                     brick_id: cur_bid,
-                    z_start: cur_z_start,
                     z_end: cur_z_end,
                     tainted: false,
                 });
@@ -126,7 +116,6 @@ fn stack_bricks(bricks: &[Brick]) -> (Vec<usize>, HashMap<usize, BrickNode>) {
         brick_graph.insert(
             cur_bid,
             BrickNode {
-                brick_id: cur_bid,
                 parents: taints_id.into_iter().collect(),
                 children: Vec::new(),
             },
@@ -144,13 +133,10 @@ fn stack_bricks(bricks: &[Brick]) -> (Vec<usize>, HashMap<usize, BrickNode>) {
             }
         }
     }
-    let disintegrated: Vec<usize> = disintegrated_status.iter().filter_map(|(bid, status)| {
-        if !status {
-            Some(*bid)
-        } else {
-            None
-        }
-    }).collect();
+    let disintegrated: Vec<usize> = disintegrated_status
+        .iter()
+        .filter_map(|(bid, status)| if !status { Some(*bid) } else { None })
+        .collect();
 
     (disintegrated, brick_graph)
 }
@@ -168,13 +154,55 @@ pub fn part_one(input: &str) -> Option<usize> {
     Some(disintegrated.iter().count())
 }
 
-fn calculate_fall(brick_graph: &HashMap<usize, BrickNode>, start: &BrickNode) -> u32 {
-    
+fn calculate_fall(
+    brick_graph: &HashMap<usize, BrickNode>,
+    start: usize,
+    disintegrated: &[usize],
+) -> usize {
+    if disintegrated.contains(&start) {
+        return 0;
+    }
 
-    todo!()
+    let mut brick_chain: HashSet<usize> = HashSet::new();
+    let mut waiting: HashMap<usize, HashSet<usize>> = HashMap::new();
+
+    let neighbors = brick_graph
+        .get(&start)
+        .unwrap()
+        .children
+        .iter()
+        .map(|bid| (*bid, start));
+    let mut bfs = VecDeque::from_iter(neighbors);
+
+    while let Some((curr_bid, prev_bid)) = bfs.pop_front() {
+        if brick_chain.contains(&curr_bid) {
+            continue;
+        }
+
+        let BrickNode {
+            parents, children, ..
+        } = brick_graph.get(&curr_bid).unwrap();
+
+        if parents.len() > 1 {
+            let waiting_for = waiting
+                .entry(curr_bid)
+                .or_insert(HashSet::from_iter(parents.clone()));
+            waiting_for.remove(&prev_bid);
+            if !waiting_for.is_empty() {
+                continue;
+            }
+        }
+
+        for c in children {
+            bfs.push_back((*c, curr_bid));
+        }
+        brick_chain.insert(curr_bid);
+    }
+
+    brick_chain.len()
 }
 
-pub fn part_two(input: &str) -> Option<u32> {
+pub fn part_two(input: &str) -> Option<usize> {
     let (_, mut bricks) = parse_input(input).unwrap();
     bricks.sort_by_key(
         |Brick {
@@ -182,19 +210,13 @@ pub fn part_two(input: &str) -> Option<u32> {
              ..
          }| *z,
     );
-    let (disintegrated, mut brick_graph) = stack_bricks(&bricks);
+    let (disintegrated, brick_graph) = stack_bricks(&bricks);
 
-    Some((0..brick_graph.len()).map(|bid| {
-        if disintegrated.contains(&bid) {
-            0
-        } else {
-            let disint_brick = brick_graph.remove(&bid).unwrap();
-            let bricks_fall = calculate_fall(&brick_graph, &disint_brick);
-            brick_graph.insert(bid, disint_brick);
-
-            1
-        }
-    }).sum())
+    Some(
+        (0..brick_graph.len())
+            .map(|bid| calculate_fall(&brick_graph, bid, &disintegrated))
+            .sum(),
+    )
 }
 
 #[cfg(test)]
