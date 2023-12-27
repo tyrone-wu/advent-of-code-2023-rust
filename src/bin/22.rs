@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use nom::{
     bytes::complete::tag,
@@ -29,6 +29,20 @@ struct BrickPiece {
     tainted: bool,
 }
 
+#[derive(Debug)]
+struct BrickNode {
+    brick_id: usize,
+    parents: Vec<usize>,
+    children: Vec<usize>,
+}
+
+#[derive(Debug)]
+struct BrickFall {
+    current_bid: usize,
+    prev_bid: Option<usize>,
+    chain: HashSet<usize>
+}
+
 fn parse_brick(input: &str) -> IResult<&str, Coord> {
     let (input, x) = complete::u32(input)?;
     let (input, y) = preceded(tag(","), complete::u32)(input)?;
@@ -50,16 +64,10 @@ fn parse_input(input: &str) -> IResult<&str, Vec<Brick>> {
     )(input)
 }
 
-pub fn part_one(input: &str) -> Option<usize> {
-    let (_, mut bricks) = parse_input(input).unwrap();
-    bricks.sort_by_key(
-        |Brick {
-             start: Coord { z, .. },
-             ..
-         }| *z,
-    );
-
+fn stack_bricks(bricks: &[Brick]) -> (Vec<usize>, HashMap<usize, BrickNode>) {
+    let mut brick_graph: HashMap<usize, BrickNode> = HashMap::new();
     let mut grid: [[Vec<BrickPiece>; 10]; 10] = Default::default();
+
     for (cur_bid, brick) in bricks.iter().enumerate() {
         let Brick {
             start: cur_start,
@@ -98,6 +106,7 @@ pub fn part_one(input: &str) -> Option<usize> {
                 if taints_id.len() == 1 && taints_xy.contains(&(x, y)) {
                     grid[x][y].iter_mut().last().unwrap().tainted = true;
                 }
+
                 grid[x][y].push(BrickPiece {
                     brick_id: cur_bid,
                     z_start: cur_z_start,
@@ -106,36 +115,86 @@ pub fn part_one(input: &str) -> Option<usize> {
                 });
             }
         }
+
+        for bid in &taints_id {
+            let children = &mut brick_graph.get_mut(bid).unwrap().children;
+            if !children.contains(&cur_bid) {
+                children.push(cur_bid)
+            }
+        }
+
+        brick_graph.insert(
+            cur_bid,
+            BrickNode {
+                brick_id: cur_bid,
+                parents: taints_id.into_iter().collect(),
+                children: Vec::new(),
+            },
+        );
     }
 
-    let mut disintegrated: HashMap<usize, bool> = HashMap::new();
+    let mut disintegrated_status: HashMap<usize, bool> = HashMap::new();
     for x in 0..10 {
         for y in 0..10 {
             for BrickPiece {
                 brick_id, tainted, ..
             } in grid[x][y].iter()
             {
-                if let Some(taint_status) = disintegrated.get_mut(brick_id) {
-                    if !(*taint_status) {
-                        *taint_status = *tainted;
-                    }
-                } else {
-                    disintegrated.insert(*brick_id, *tainted);
-                }
+                *disintegrated_status.entry(*brick_id).or_insert(false) |= *tainted;
             }
         }
     }
+    let disintegrated: Vec<usize> = disintegrated_status.iter().filter_map(|(bid, status)| {
+        if !status {
+            Some(*bid)
+        } else {
+            None
+        }
+    }).collect();
 
-    Some(
-        disintegrated
-            .iter()
-            .filter(|(_, tainted)| !**tainted)
-            .count(),
-    )
+    (disintegrated, brick_graph)
+}
+
+pub fn part_one(input: &str) -> Option<usize> {
+    let (_, mut bricks) = parse_input(input).unwrap();
+    bricks.sort_by_key(
+        |Brick {
+             start: Coord { z, .. },
+             ..
+         }| *z,
+    );
+
+    let (disintegrated, _) = stack_bricks(&bricks);
+    Some(disintegrated.iter().count())
+}
+
+fn calculate_fall(brick_graph: &HashMap<usize, BrickNode>, start: &BrickNode) -> u32 {
+    
+
+    todo!()
 }
 
 pub fn part_two(input: &str) -> Option<u32> {
-    None
+    let (_, mut bricks) = parse_input(input).unwrap();
+    bricks.sort_by_key(
+        |Brick {
+             start: Coord { z, .. },
+             ..
+         }| *z,
+    );
+    let (disintegrated, mut brick_graph) = stack_bricks(&bricks);
+
+    Some((0..brick_graph.len()).map(|bid| {
+        if disintegrated.contains(&bid) {
+            0
+        } else {
+            let disint_brick = brick_graph.remove(&bid).unwrap();
+            let bricks_fall = calculate_fall(&brick_graph, &disint_brick);
+            brick_graph.insert(bid, disint_brick);
+
+            1
+        }
+    }).sum())
 }
 
 #[cfg(test)]
@@ -150,9 +209,7 @@ mod tests {
 
     #[test]
     fn test_part_two() {
-        let result = part_two(&advent_of_code::template::read_file_part(
-            "examples", DAY, 1,
-        ));
-        assert_eq!(result, None);
+        let result = part_two(&advent_of_code::template::read_file("examples", DAY));
+        assert_eq!(result, Some(7));
     }
 }
