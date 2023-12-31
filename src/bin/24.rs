@@ -1,10 +1,14 @@
-use nalgebra::{Matrix2, Matrix2x1, Matrix4, Matrix4x1, RowVector2, RowVector4};
+// use nalgebra::{Matrix2, Matrix2x1, Matrix4, Matrix4x1, RowVector2, RowVector4};
 use nom::{
     bytes::complete::tag,
     character::complete::{self, newline, space1},
     multi::separated_list1,
     sequence::{preceded, separated_pair, tuple},
     IResult, Parser,
+};
+use z3::{
+    ast::{Ast, Int},
+    Config, Context, SatResult, Solver,
 };
 
 advent_of_code::solution!(24);
@@ -119,115 +123,187 @@ pub fn part_one(input: &str) -> Option<u32> {
     Some(collisions)
 }
 
-// Gives the row of A matrix for x, y, vx, vy, and b
-fn xy_row(hs_0: &Hailstone, hs_1: &Hailstone) -> (RowVector4<f64>, f64) {
-    let Hailstone {
-        position: Position {
-            px: px_0, py: py_0, ..
-        },
-        velocity: Velocity {
-            vx: vx_0, vy: vy_0, ..
-        },
-    } = hs_0;
-    let Hailstone {
-        position: Position {
-            px: px_1, py: py_1, ..
-        },
-        velocity: Velocity {
-            vx: vx_1, vy: vy_1, ..
-        },
-    } = hs_1;
-    (
-        RowVector4::new(vy_1 - vy_0, vx_0 - vx_1, py_0 - py_1, px_1 - px_0),
-        (*vx_0 as i128 * *py_0 as i128 - *vx_1 as i128 * *py_1 as i128
-            + *px_1 as i128 * *vy_1 as i128
-            - *px_0 as i128 * *vy_0 as i128) as f64,
-    )
-}
+// // Gives the row of A matrix for x, y, vx, vy, and b
+// fn xy_row(hs_0: &Hailstone, hs_1: &Hailstone) -> (RowVector4<f64>, f64) {
+//     let Hailstone {
+//         position: Position {
+//             px: px_0, py: py_0, ..
+//         },
+//         velocity: Velocity {
+//             vx: vx_0, vy: vy_0, ..
+//         },
+//     } = hs_0;
+//     let Hailstone {
+//         position: Position {
+//             px: px_1, py: py_1, ..
+//         },
+//         velocity: Velocity {
+//             vx: vx_1, vy: vy_1, ..
+//         },
+//     } = hs_1;
+//     (
+//         RowVector4::new(vy_1 - vy_0, vx_0 - vx_1, py_0 - py_1, px_1 - px_0),
+//         (*vx_0 as i128 * *py_0 as i128 - *vx_1 as i128 * *py_1 as i128
+//             + *px_1 as i128 * *vy_1 as i128
+//             - *px_0 as i128 * *vy_0 as i128) as f64,
+//     )
+// }
 
-// Gives the row of A matrix for z and vz, and b
-fn z_row(hs_0: &Hailstone, hs_1: &Hailstone, x_pos: f64, x_vel: f64) -> (RowVector2<f64>, f64) {
-    let Hailstone {
-        position: Position {
-            px: px_0, pz: pz_0, ..
-        },
-        velocity: Velocity {
-            vx: vx_0, vz: vz_0, ..
-        },
-    } = hs_0;
-    let Hailstone {
-        position: Position {
-            px: px_1, pz: pz_1, ..
-        },
-        velocity: Velocity {
-            vx: vx_1, vz: vz_1, ..
-        },
-    } = hs_1;
-    (
-        RowVector2::new(vx_0 - vx_1, px_1 - px_0),
-        (*vx_0 as i128 * *pz_0 as i128 - *vx_1 as i128 * *pz_1 as i128
-            + *px_1 as i128 * *vz_1 as i128
-            - *px_0 as i128 * *vz_0 as i128
-            - (pz_0 - pz_1) as i128 * x_vel as i128
-            - (vz_1 - vz_0) as i128 * x_pos as i128) as f64,
-    )
-}
+// // Gives the row of A matrix for z and vz, and b
+// fn z_row(hs_0: &Hailstone, hs_1: &Hailstone, x_pos: f64, x_vel: f64) -> (RowVector2<f64>, f64) {
+//     let Hailstone {
+//         position: Position {
+//             px: px_0, pz: pz_0, ..
+//         },
+//         velocity: Velocity {
+//             vx: vx_0, vz: vz_0, ..
+//         },
+//     } = hs_0;
+//     let Hailstone {
+//         position: Position {
+//             px: px_1, pz: pz_1, ..
+//         },
+//         velocity: Velocity {
+//             vx: vx_1, vz: vz_1, ..
+//         },
+//     } = hs_1;
+//     (
+//         RowVector2::new(vx_0 - vx_1, px_1 - px_0),
+//         (*vx_0 as i128 * *pz_0 as i128 - *vx_1 as i128 * *pz_1 as i128
+//             + *px_1 as i128 * *vz_1 as i128
+//             - *px_0 as i128 * *vz_0 as i128
+//             - (pz_0 - pz_1) as i128 * x_vel as i128
+//             - (vz_1 - vz_0) as i128 * x_pos as i128) as f64,
+//     )
+// }
 
-pub fn part_two(input: &str) -> Option<f64> {
+// If error with cland, run: sudo apt-get update && sudo apt-get install libclang-dev -y
+pub fn part_two(input: &str) -> Option<i64> {
     let (_, hailstones) = parse_input(input).unwrap();
 
-    let hs_a = &hailstones[0];
-    let hs_b = &hailstones[1];
-    let hs_c = &hailstones[2];
-    let hs_d = &hailstones[3];
-    let hs_e = &hailstones[4];
+    let cfg = Config::new();
+    let ctx = Context::new(&cfg);
+    let solver = Solver::new(&ctx);
 
-    let (ab_xy_a, ab_xy_b) = xy_row(hs_a, hs_b);
-    let (bc_xy_a, bc_xy_b) = xy_row(hs_b, hs_c);
-    let (cd_xy_a, cd_xy_b) = xy_row(hs_c, hs_d);
-    let (de_xy_a, de_xy_b) = xy_row(hs_d, hs_e);
+    let px_t = Int::new_const(&ctx, "px_t");
+    let py_t = Int::new_const(&ctx, "py_t");
+    let pz_t = Int::new_const(&ctx, "pz_t");
+    let vx_t = Int::new_const(&ctx, "vx_t");
+    let vy_t = Int::new_const(&ctx, "vy_t");
+    let vz_t = Int::new_const(&ctx, "vz_t");
 
-    let a_xy_matrix = Matrix4::from_rows(&[ab_xy_a, bc_xy_a, cd_xy_a, de_xy_a]);
-    let b_xy_vec = Matrix4x1::from([ab_xy_b, bc_xy_b, cd_xy_b, de_xy_b]);
+    for (i, Hailstone { position, velocity }) in hailstones.iter().take(3).enumerate() {
+        let (px, py, pz) = (
+            Int::from_i64(&ctx, position.px as i64),
+            Int::from_i64(&ctx, position.py as i64),
+            Int::from_i64(&ctx, position.pz as i64),
+        );
+        let (vx, vy, vz) = (
+            Int::from_i64(&ctx, velocity.vx as i64),
+            Int::from_i64(&ctx, velocity.vy as i64),
+            Int::from_i64(&ctx, velocity.vz as i64),
+        );
+
+        let t = Int::new_const(&ctx, format!("t_{}", i));
+
+        let x_constraint = &(&px_t + &vx_t * &t)._eq(&(&px + &vx * &t));
+        let y_constraint = &(&py_t + &vy_t * &t)._eq(&(&py + &vy * &t));
+        let z_constraint = &(&pz_t + &vz_t * &t)._eq(&(&pz + &vz * &t));
+
+        solver.assert(x_constraint);
+        solver.assert(y_constraint);
+        solver.assert(z_constraint);
+    }
+
+    if solver.check() == SatResult::Sat {
+        let model = solver.get_model().unwrap();
+
+        let x = model.get_const_interp(&px_t).unwrap().as_i64().unwrap();
+        let y = model.get_const_interp(&py_t).unwrap().as_i64().unwrap();
+        let z = model.get_const_interp(&pz_t).unwrap().as_i64().unwrap();
+
+        Some(x + y + z)
+    } else {
+        None
+    }
+
+    // for (i, row) in a_xy_matrix.row_iter().enumerate() {
+    //     let (a, b, c, d) = (
+    //         Int::from_i64(&ctx, row[0] as i64),
+    //         Int::from_i64(&ctx, row[1] as i64),
+    //         Int::from_i64(&ctx, row[2] as i64),
+    //         Int::from_i64(&ctx, row[3] as i64)
+    //     );
+    //     let equation = &(&a * &px_t + &b * &py_t + &c * &vx_t + &d * &vy_t)._eq(&Int::from_i64(&ctx, b_xy_vec[i] as i64));
+    //     solver.assert(equation);
+    // }
+
+    // match solver.check() {
+    //     SatResult::Unsat => println!("unsat"),
+    //     SatResult::Unknown => println!("unknown"),
+    //     SatResult::Sat => println!("sat"),
+    // }
+
+    // if let Some(model) = solver.get_model() {
+    //     let x = model.eval(&px_t, true).unwrap().as_i64().unwrap();
+    //     let y = model.eval(&py_t, true).unwrap().as_i64().unwrap();
+    //     dbg!(&x);
+    //     dbg!(&y);
+    // }
+
+    // let hs_a = &hailstones[0];
+    // let hs_b = &hailstones[1];
+    // let hs_c = &hailstones[2];
+    // let hs_d = &hailstones[3];
+    // let hs_e = &hailstones[4];
+
+    // let (ab_xy_a, ab_xy_b) = xy_row(hs_a, hs_b);
+    // let (bc_xy_a, bc_xy_b) = xy_row(hs_b, hs_c);
+    // let (cd_xy_a, cd_xy_b) = xy_row(hs_c, hs_d);
+    // let (de_xy_a, de_xy_b) = xy_row(hs_d, hs_e);
+
+    // let a_xy_matrix = Matrix4::from_rows(&[ab_xy_a, bc_xy_a, cd_xy_a, de_xy_a]);
+    // let b_xy_vec = Matrix4x1::from([ab_xy_b, bc_xy_b, cd_xy_b, de_xy_b]);
 
     // let a_xy_inverse = a_xy_matrix.try_inverse().unwrap();
     // let x_xy_solution = a_xy_inverse * b_xy_vec;
-    // let x_xy_solution = a_xy_matrix.lu().solve(&b_xy_vec).unwrap();
-    // let x_xy_solution = a_xy_matrix.qr().solve(&b_xy_vec).unwrap();
-    // let x_xy_solution = a_xy_matrix.full_piv_lu().solve(&b_xy_vec).unwrap();
-    let x_xy_solution = a_xy_matrix.svd(true, true).solve(&b_xy_vec, 0.0).unwrap();
-    let (xp, yp, xv, _) = (
-        x_xy_solution.x,
-        x_xy_solution.y,
-        x_xy_solution.z,
-        x_xy_solution.w,
-    );
+    // // let x_xy_solution = a_xy_matrix.lu().solve(&b_xy_vec).unwrap();
+    // // let x_xy_solution = a_xy_matrix.qr().solve(&b_xy_vec).unwrap();
+    // // let x_xy_solution = a_xy_matrix.full_piv_lu().solve(&b_xy_vec).unwrap();
+    // // let x_xy_solution = a_xy_matrix.svd(true, true).solve(&b_xy_vec, 0.0).unwrap();
+    // let (xp, yp, xv, _) = (
+    //     x_xy_solution.x,
+    //     x_xy_solution.y,
+    //     x_xy_solution.z,
+    //     x_xy_solution.w,
+    // );
 
-    let (ab_z_a, ab_z_b) = z_row(hs_a, hs_b, xp, xv);
-    let (bc_z_a, bc_z_b) = z_row(hs_b, hs_c, xp, xv);
+    // let (ab_z_a, ab_z_b) = z_row(hs_a, hs_b, xp, xv);
+    // let (cd_z_a, cd_z_b) = z_row(hs_c, hs_d, xp, xv);
 
-    let a_z_matrix = Matrix2::from_rows(&[ab_z_a, bc_z_a]);
-    let b_z_vec = Matrix2x1::from([ab_z_b, bc_z_b]);
+    // let a_z_matrix = Matrix2::from_rows(&[ab_z_a, cd_z_a]);
+    // let b_z_vec = Matrix2x1::from([ab_z_b, cd_z_b]);
 
     // let a_z_inverse = a_z_matrix.try_inverse().unwrap();
     // let x_z_solution = a_z_inverse * b_z_vec;
-    // let x_z_solution = a_z_matrix.lu().solve(&b_z_vec).unwrap();
-    // let x_z_solution = a_z_matrix.qr().solve(&b_z_vec).unwrap();
-    // let x_z_solution = a_z_matrix.full_piv_lu().solve(&b_z_vec).unwrap();
-    let x_z_solution = a_z_matrix.svd(true, true).solve(&b_z_vec, 0.0).unwrap();
-    let (zp, _) = (x_z_solution.x, x_z_solution.y);
+    // // let x_z_solution = a_z_matrix.lu().solve(&b_z_vec).unwrap();
+    // // let x_z_solution = a_z_matrix.qr().solve(&b_z_vec).unwrap();
+    // // let x_z_solution = a_z_matrix.full_piv_lu().solve(&b_z_vec).unwrap();
+    // // let x_z_solution = a_z_matrix.svd(true, true).solve(&b_z_vec, 0.0).unwrap();
+    // let (zp, _) = (x_z_solution.x, x_z_solution.y);
 
-    // 786_617_045_860_269.3 from A inverse : too high
-    // 786_617_045_860_272.6 from LU decomp with partial pivoting : too high
-    // 786_617_045_860_268.6 from QR decomp : forgot
-    // 786_617_045_860_268   from LU with full pivoting : forgot
-    // 786_579_841_992_401.1 from SVD : went over submission limit to give high/low
-    // 786_546_539_760_670
+    // // 786_617_045_860_269.3 from A inverse : too high
+    // // 786_617_045_860_272.6 from LU decomp with partial pivoting : too high
+    // // 786_617_045_860_268.6 from QR decomp : forgot
+    // // 786_617_045_860_268   from LU with full pivoting : forgot
+    // // 786_579_841_992_401.1 from SVD : went over submission limit to give high/low
 
-    dbg!(&xp);
-    dbg!(&yp);
-    dbg!(&zp);
-    Some(xp + yp + zp)
+    // // 786_617_045_860_267 my actual answer
+
+    // dbg!(&xp);
+    // dbg!(&yp);
+    // dbg!(&zp);
+    // Some(xp + yp + zp)
 }
 
 #[cfg(test)]
@@ -243,6 +319,6 @@ mod tests {
     #[test]
     fn test_part_two() {
         let result = part_two(&advent_of_code::template::read_file("examples", DAY));
-        assert_eq!(result, Some(47.0));
+        assert_eq!(result, Some(47));
     }
 }
