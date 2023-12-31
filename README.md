@@ -8,6 +8,10 @@ Solutions for [Advent of Code](https://adventofcode.com/) in [Rust](https://www.
 
 <!--- benchmarking table --->
 
+<p align="center">
+<img src="./docs/pretty_image.png">
+</p>
+
 ---
 
 ## Template setup
